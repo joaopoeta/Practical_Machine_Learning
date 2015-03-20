@@ -1,0 +1,295 @@
+---
+title: "Practical Machine Learning - Project"
+author: "JPOETA"
+date: "March 14, 2015"
+output: html_document
+---
+
+
+### 1. Overview
+
+This Report analyses data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The source of the data is available from the website: http://groupware.les.inf.puc-rio.br/har, whom we thank for their generosity to provide the data. 
+
+The goal of this report is to predict the manner in which the participants did the exercise ("how (well)" an activity was performed by the wearer). This is the **"classe"** variable in the training set. The participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (**Class A**), throwing the elbows to the front (**Class B**), lifting the dumbbell only halfway (**Class C**), lowering the dumbbell only halfway (**Class D**) and throwing the hips to the front (**Class E**).
+
+Important steps in our Analysis:
+
+1. Cleaning and Preprocessing the data;
+
+2. How we built our model? First we build 6 isolated models and measure their accuracy: **(1)** Random Forest, **(2)** Boosted Trees, **(3)** Linear Discriminant Analysis, **(4)** Recursive Partitioning, **(5)** Bagged Trees and **(6)** Naive Bayes. After we try to built 2 combined Models;
+
+3. How we used cross validation: we split the data **pml-training.csv** in *80%* Training Data and *20%* Cross Validation. The Cross Validation Data will be used to evaluate the performance (Accuracy) of each Model;
+
+4. We evaluate the Statistics of the Methods with the information about the **Accuracy**. Then we choice the Model (or the combination of Model) with the higth **Accuracy**;
+
+5. To conclude we will also use ours Prediction Models to predict 20 different test cases; 
+
+
+
+### 2. Set Global Options, Libraries and Parameters
+
+```{r setoptions, echo=TRUE, warning=FALSE, message=FALSE}
+library(knitr); library(caret); opts_chunk$set(echo = TRUE)
+```
+
+
+
+### 3. Read Data
+
+```{r cache=TRUE}
+# Read CSV into R
+train <- read.csv(file="pml-training.csv", header=TRUE, sep=",")
+test <- read.csv(file="pml-testing.csv", header=TRUE, sep=",")
+```
+
+A resume of these two raw Datasets is:
+
+1. Training Dataset: **nrow=`r nrow(train)`** and **ncol=`r ncol(train)`**.
+2. Test Dataset: **nrow=`r nrow(test)`** and **ncol=`r ncol(test)`**.
+3. All possible values of the "classe" variable: **`r unique(train$classe)`**
+
+
+
+### 4. Cleaning and Preprocessing Data
+
+Below we will apply preprocessing on the Datasets relatively to the following 4 points:
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+# (1) Eliminating the missing values **NA**
+trainNA <- colSums(is.na(train)) == 0
+newtrain <- train[ , trainNA]
+newtest <- test[ , trainNA]
+
+# (2) Eliminating: column-1 = [only a index] and column-2 = [name of participants]
+newtrain <- newtrain[, -c(1,2)]
+newtest <- newtest[, -c(1,2)]
+
+# (3) Eliminating other non-numeric variables
+train_numeric_col <- vector()
+for(i in (1:ncol(newtrain))){train_numeric_col[i] <- class(newtrain[,i])=="numeric"}
+newtrain <- newtrain[, train_numeric_col]
+newtest <- newtest[, train_numeric_col]
+
+# (4) Preprocessing the Datasets
+preObj <-preProcess(newtrain, method=c('center', 'scale')) 
+newtrain <- predict(preObj, newtrain)
+newtrain$classe <- train$classe
+newtest <- predict(preObj, newtest)
+```
+
+After the Cleaning and Preprocessing the size of the Datasets is:
+
+1. Cleaned and Preprocessed Training Dataset: **nrow=`r nrow(newtrain)`** and **ncol=`r ncol(newtrain)`**.
+2. Cleaned and Preprocessed Test Dataset: **nrow=`r nrow(newtest)`** and **ncol=`r ncol(newtest)`**.
+
+
+
+### 5. Splitting Data
+
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+# Splitting Data
+inTrain <- createDataPartition(newtrain$classe, p = .80, list=FALSE)
+train_data <- newtrain[inTrain,]
+cv_data <- newtrain[-inTrain,]
+```
+
+
+
+### 6. Models Fitting
+
+```{r}
+# Global Parameters
+set.seed(3333)
+Models <- c(); Duration <- c(); Accuracy <- c();
+```
+
+**MODEL 01:** Random Forest ("rf") library(randomForest)
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+Models <- c(Models, "Random Forest")
+initial_time <- Sys.time()
+model_rf <- train(classe ~., method="rf", data = train_data, trControl = trainControl(method = "cv"), number=5, allowParallel = TRUE)
+final_time <- Sys.time()
+Duration <- c(Duration, final_time - initial_time)
+```
+
+**MODEL 02:** Boosted Trees ("gbm")
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+#library(gbm)
+Models <- c(Models, "Boosted Trees")
+initial_time <- Sys.time()
+model_gbm <- train(classe ~., method = "gbm", data = train_data)
+final_time <- Sys.time()
+Duration <- c(Duration, final_time - initial_time)
+```
+
+**MODEL 03:** Linear Discriminant Analysis ("lda")
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+#library(MASS)
+Models <- c(Models, "Linear Discriminant Analysis")
+initial_time <- Sys.time()
+model_lda <- train(classe ~ ., data = train_data, method = "lda")
+final_time <- Sys.time()
+Duration <- c(Duration, final_time - initial_time)
+```
+
+**MODEL 04:** Recursive Partitioning ("rpart")
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+library(rpart)
+Models <- c(Models, "Recursive Partitioning")
+initial_time <- Sys.time()
+model_rpart <- train(classe ~ ., data = train_data, method = "rpart", trControl = trainControl(method = "cv", number = 5))
+final_time <- Sys.time()
+Duration <- c(Duration,final_time - initial_time)
+```
+
+**MODEL 05:** Bagged Trees
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+library(ipred); Models <- c(Models, "Bagged Trees")
+initial_time <- Sys.time()
+model_treebag <- train(classe ~ ., data = train_data, method = "treebag")
+final_time <- Sys.time()
+Duration <- c(Duration,final_time - initial_time)
+```
+
+**MODEL 06:** Naive Bayes
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+library(klaR); Models <- c(Models, "Naive Bayes")
+initial_time <- Sys.time()
+model_nb <- train(classe ~ ., data = train_data, method = "nb")
+final_time <- Sys.time()
+Duration <- c(Duration,final_time - initial_time)
+```
+
+
+
+### 7. Models Performance: Accuracy
+
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+# (1) model_rf
+cv_Pred_rf <- predict(model_rf, newdata = cv_data)
+CM_rf <- confusionMatrix(cv_Pred_rf, cv_data$classe)
+Accuracy <- c(Accuracy, CM_rf$overall["Accuracy"])
+
+# (2) model_gbm
+cv_Pred_gbm <- predict(model_gbm, newdata = cv_data)
+CM_gbm <- confusionMatrix(cv_Pred_gbm, cv_data$classe)
+Accuracy <- c(Accuracy, CM_gbm$overall["Accuracy"])
+
+# (3) model_lda
+cv_Pred_lda <- predict(model_lda, newdata = cv_data)
+CM_lda <- confusionMatrix(cv_Pred_lda, cv_data$classe)
+Accuracy <- c(Accuracy, CM_lda$overall["Accuracy"])
+
+# (4) model_rpart
+cv_Pred_rpart <- predict(model_rpart, newdata = cv_data)
+CM_rpart <- confusionMatrix(cv_Pred_rpart, cv_data$classe)
+Accuracy <- c(Accuracy, CM_rpart$overall["Accuracy"])
+
+# (5) model_treebag
+cv_Pred_treebag <- predict(model_treebag, newdata = cv_data)
+CM_treebag <- confusionMatrix(cv_Pred_treebag, cv_data$classe)
+Accuracy <- c(Accuracy, CM_treebag$overall["Accuracy"])
+
+# (6) model_nb
+cv_Pred_nb <- predict(model_nb, newdata = cv_data)
+CM_nb <- confusionMatrix(cv_Pred_nb, cv_data$classe)
+Accuracy <- c(Accuracy, CM_nb$overall["Accuracy"])
+
+# Resume Report 01
+index_ordered <- order(Accuracy, decreasing = TRUE)
+resume <- data.frame(Models[index_ordered], Duration[index_ordered], Accuracy[index_ordered])
+colnames(resume) <- c("Models", "Duration", "Accuracy")
+kable(resume, format = "markdown")
+```
+
+
+
+### 8. Combining Models
+
+**COMBO Version 01:** Here we choose the methods with Accuracy greater than **0.9**: **Random Forest**, **Boosted Trees** and **Bagged Trees**. Then we combine they and the Training is made with a Random Forest.
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+df1 <- data.frame(cv_Pred_rf, cv_Pred_gbm, cv_Pred_treebag, classe = cv_data$classe)
+Combo1 <- train(classe ~ ., data = df1, method = "rf")
+pred_Combo1 <- predict(Combo1, df1)
+CM_Combo1 <- confusionMatrix(pred_Combo1, cv_data$classe)
+```
+
+**COMBO Version 02:** All 6 Methods combined and Training with Random Forest
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, results='hide'}
+df2 <- data.frame(cv_Pred_rf, cv_Pred_gbm, cv_Pred_lda, cv_Pred_rpart, cv_Pred_treebag, cv_Pred_nb, classe = cv_data$classe)
+Combo2 <- train(classe ~ ., data = df2, method = "rf")
+pred_Combo2 <- predict(Combo2, df2)
+CM_Combo2 <- confusionMatrix(pred_Combo2, cv_data$classe)
+```
+
+The performances of the **COMBO Models** are:
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+# Resume Report
+combo_models <- c("[Random Forest] + [Boosted Trees] + [Bagged Trees]", "[Random Forest] + [Boosted Trees] + [Bagged Trees] + [Linear Discriminant Analysis] + [Recursive Partitioning] + [Naive Bayes]")
+ac_combo <- c(CM_Combo1$overall["Accuracy"], CM_Combo2$overall["Accuracy"]) 
+
+ind_ord <- order(ac_combo, decreasing = TRUE)
+resume2 <- data.frame(combo_models[ind_ord], ac_combo[ind_ord])
+colnames(resume2) <- c("Combined Models (COMBO)", "Accuracy")
+kable(resume2, format = "markdown")
+```
+
+We note that the Performace (Accuracy) of the both combined Methos has increased as compared with the individual models. The error rate of the prediction on the data cross validation has even more decreased. We are strongly inclined to choose the methods with Accuracy above **0.9**. Next, as illustrative strategy we will predict the 20 Test Cases with all models that we have developed in this report: the 6 individual models and the 2 combined models.
+
+
+
+### 9. Predicting the Test Dataset
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+# Individuals Predictions
+pred_rf <- predict(model_rf, newdata = newtest)
+pred_gbm <- predict(model_gbm, newdata = newtest)
+pred_lda <- predict(model_lda, newdata = newtest)
+pred_rpart <- predict(model_rpart, newdata = newtest)
+pred_treebag <- predict(model_treebag, newdata = newtest)
+pred_nb <- predict(model_nb, newdata = newtest)
+
+# COMBO-1 Predictions
+DF1 <- data.frame(pred_rf, pred_gbm, pred_treebag)
+colnames(DF1) <- c("cv_Pred_rf", "cv_Pred_gbm", "cv_Pred_treebag")
+pred_COMBO1 <- predict(Combo1, DF1) 
+
+# COMBO-2 Predictions   cv_Pred_nb
+DF2 <- data.frame(pred_rf, pred_gbm, pred_lda, pred_rpart, pred_treebag, pred_nb)
+colnames(DF2) <- c("cv_Pred_rf", "cv_Pred_gbm", "cv_Pred_lda","cv_Pred_rpart","cv_Pred_treebag","cv_Pred_nb")
+pred_COMBO2 <- predict(Combo2,  DF2) 
+```
+
+
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+pred_list <- c(paste(pred_COMBO2, collapse=" "),
+               paste(pred_COMBO1, collapse=" "),
+               paste(pred_rf, collapse=" "),
+               paste(pred_treebag, collapse=" "),
+               paste(pred_gbm, collapse=" "),
+               paste(pred_nb, collapse=" "),
+               paste(pred_lda, collapse=" "),
+               paste(pred_rpart, collapse=" "))
+models_names <- c("Combo2", "Combo1", "Random Forest", "Bagged Trees", "Boosted Trees", "Naive Bayes", "Linear Discriminant Analysis", "Recursive Partitioning")
+resume3 <- data.frame(models_names, pred_list)
+colnames(resume3) <- c("Models Names", "Prediction of the 20 Test Cases")
+kable(resume3, format = "markdown")
+```
+
+
+**CONCLUSION**: we conclude that the results of the first 5 Models are identical. This indicates that they are strong candidates of the results to the 20 Test Cases. We consider thus the prediction as: **B A B A A E D B A A B C B A E E A B B B**.
+
+Finally, we save these answer as TXT-Files:
+
+```{r cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+answers <- as.vector(pred_COMBO2)
+pml_write_files(answers)
+```
+
+
+
